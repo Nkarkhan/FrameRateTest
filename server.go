@@ -24,16 +24,18 @@ func main() {
 	addressPtr := flag.String("address", "localhost", "Bind/target address for server/client")
 	portPtr := flag.Int("port", 3333, "Bind/target port for server/client")
 	fileSzPtr := flag.Int("fSize", 100000, "File Size")
+	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 
 	flag.Parse()
 	fmt.Println("ServerMode:", *serverPtr)
 	fmt.Println("address:", *addressPtr)
 	fmt.Println("port:", *portPtr)
 	fmt.Println("fileSz:", *fileSzPtr)
+	fmt.Println("Hz:", *frameRatePtr)
 	if *serverPtr {
 		setupServer(*addressPtr, *portPtr, *fileSzPtr)
 	} else {
-		setupClient(*addressPtr, *portPtr, *fileSzPtr)
+		setupClient(*addressPtr, *portPtr, *fileSzPtr, *frameRatePtr)
 	}
 }
 
@@ -64,7 +66,8 @@ func setupServer(serverAddress string,
 
 func setupClient(serverAddress string,
 	serverPort int,
-	fileSize int) {
+	fileSize int,
+	frameRate int) {
 	con, err := net.Dial(CONN_TYPE, serverAddress+":"+strconv.Itoa(serverPort))
 	if err != nil {
 		log.Fatalln(err)
@@ -75,7 +78,11 @@ func setupClient(serverAddress string,
 		buf[i] = byte(i)
 	}
 	hz := 0
+	// 30 hz is what we target
+	// Time for each frame is 1000/30 msec
+	timeForEachFrame := int(1000 / frameRate)
 	for {
+		t := time.Now()
 		wrLen, err := con.Write(buf)
 		if err != nil {
 			fmt.Println("Error writing:", err.Error())
@@ -83,9 +90,12 @@ func setupClient(serverAddress string,
 		if wrLen != fileSize {
 			fmt.Println("Wrote :", wrLen)
 		}
+		for time.Since(t) < time.Duration(timeForEachFrame*int(time.Millisecond)) {
+			time.Sleep(time.Millisecond)
+		}
 		hz = hz + 1
-		if hz == 30 {
-			fmt.Println("Send 30 frames")
+		if hz == (frameRate * 10) {
+			fmt.Println("Sent frames: ", frameRate*10)
 			hz = 0
 		}
 	}
