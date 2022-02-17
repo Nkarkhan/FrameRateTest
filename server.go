@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	CONN_HOST = "localhost"
-	CONN_PORT = "3333"
-	CONN_TYPE = "tcp"
-
+	CONN_HOST   = "localhost"
+	CONN_PORT   = "3333"
+	CONN_TYPE   = "tcp"
+	MAX_WR_SZ   = 1460
 	FILE_SZ     = 10000 // 1 Mb files
 	FILE_SZ_STR = "File Size:"
 )
@@ -73,9 +73,9 @@ func setupClient(serverAddress string,
 		log.Fatalln(err)
 	}
 	defer con.Close()
-	buf := make([]byte, fileSize)
-	for i := 0; i < fileSize; i++ {
-		buf[i] = byte(i)
+	buffers := make([][]byte, fileSize/MAX_WR_SZ)
+	for i := 0; i < fileSize/MAX_WR_SZ; i++ {
+		buffers[i] = make([]byte, MAX_WR_SZ)
 	}
 	hz := 0
 	// 30 hz is what we target
@@ -83,19 +83,26 @@ func setupClient(serverAddress string,
 	timeForEachFrame := int(1000 / frameRate)
 	for {
 		t := time.Now()
-		wrLen, err := con.Write(buf)
-		if err != nil {
-			fmt.Println("Error writing:", err.Error())
+		for _, buf := range buffers {
+			_, err := con.Write(buf)
+			if err != nil {
+				fmt.Println("Error writing:", err.Error())
+				panic(err)
+			}
 		}
-		if wrLen != fileSize {
-			fmt.Println("Wrote :", wrLen)
-		}
-		for time.Since(t) < time.Duration(timeForEachFrame*int(time.Millisecond)) {
-			time.Sleep(time.Millisecond)
+		//		if wrLen != fileSize {
+		//			fmt.Println("Wrote :", wrLen)
+		//		}
+		if time.Since(t) > time.Duration(timeForEachFrame*int(time.Millisecond)) {
+			fmt.Println("Falling behind")
+		} else {
+			for time.Since(t) < time.Duration(timeForEachFrame*int(time.Millisecond)) {
+				time.Sleep(time.Millisecond)
+			}
 		}
 		hz = hz + 1
-		if hz == (frameRate * 10) {
-			fmt.Println("Sent frames: ", frameRate*10)
+		if hz == (frameRate * 1000) {
+			fmt.Println("Sent frames: ", frameRate*1000)
 			hz = 0
 		}
 	}
@@ -113,8 +120,11 @@ func handleRequest(conn net.Conn, fSize int) {
 	for {
 		rdLen, err := conn.Read(buf)
 		if err != nil {
-			fmt.Println("Error reading:", err.Error())
+			panic(err)
 		}
+		//		if rdLen != fSize {
+		//			fmt.Println("Read bytes:", rdLen)
+		//		}
 		if rdLen != 0 {
 			totalRead = totalRead + rdLen
 			framesHere := totalRead / fSize
@@ -124,6 +134,7 @@ func handleRequest(conn net.Conn, fSize int) {
 		if time.Since(t) >= time.Duration(time.Second) {
 			fmt.Println("Frame Rate: ", hz)
 			t = time.Now()
+			hz = 0
 		}
 	}
 	// Close the connection when you're done with it.
