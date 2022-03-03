@@ -12,8 +12,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "server.go",
-            "args": ["-server", "-address", "localhost", "-port", "3333", "-fSize", "10000", "-frameRate", "31"]
+            "program": "serve_files.go",
+            "args": ["-debug"]
         }
     ]
 }

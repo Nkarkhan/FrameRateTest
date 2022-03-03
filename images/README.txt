@@ -1,0 +1,1 @@
+ffmpeg -re -framerate 30 -thread_queue_size 1024 -start_number 1 -i "images\out%d.png" -codec:v libx264 -pix_fmt:v gray   -filter:v fps=24 -b 8M -f "mpegts" - | ffplay -
