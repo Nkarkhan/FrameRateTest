@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -22,6 +25,7 @@ const (
 type imageSequence struct {
 	path     string
 	fileName string
+	data     []byte
 	seq      int
 }
 
@@ -35,14 +39,16 @@ var debugSet bool
 
 func main() {
 	var wg sync.WaitGroup
-	inputPtr := flag.String("input", "c:\\Users\\nkark\\OneDrive\\Documents\\GitHub\\FrameRateTest\\images", "Input Source for images")
+	inputPtr := flag.String("input", "z:\\images", "Input Source for images")
 	d := flag.Bool("debug", false, "Debug tracing")
+	pipe := flag.Bool("pipe", false, "pipe to ffmpeg directly")
 	flag.Parse()
 	debugSet = *d
-	outputPtr := flag.String("output", "C:\\Users\\nkark\\tmp\\loopImages\\", "Output Dir for images")
+	outputPtr := flag.String("output", "z:\\loopImages\\", "Output Dir for images")
 	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 	images = make(map[int]imageSequence)
-	iterate(*inputPtr)
+	iterate(*outputPtr, true) //clean output files
+	iterate(*inputPtr, false)
 	log.Println("Number of files ", len(images))
 	for index := 1; index <= len(images); index++ {
 		if debugSet {
@@ -50,22 +56,54 @@ func main() {
 		}
 	}
 	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		populateOutput(*frameRatePtr, *outputPtr)
-	}()
+	if *pipe {
+		fmt.Println("Running the camera stream")
+		//C:\Users\nkark\Downloads\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\bin>ffmpeg -framerate 30 -thread_queue_size 20480 -start_number 1 -i "z:\loopImages\loop%d.png" -codec:v mpeg4    -preset ultrafast  -f mpegts udp://127.0.0.1:5555 -loglevel info
+
+		ffmpegCmd := exec.Command("C:\\Users\\nkark\\Downloads\\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\\bin\\ffmpeg",
+			"-loglevel", "debug", "-re", "-f", "image2pipe", "-thread_queue_size", "2048", "-i", "-",
+			"-codec:", "v", "mpeg4", "-f", "mpegts", "udp:", "////127.0.0.1:5555",
+			"")
+
+		ffpmegStdIn, err := ffmpegCmd.StdinPipe()
+		if err != nil {
+			return
+		}
+		defer ffpmegStdIn.Close()
+		ffpmegStdOut, err := ffmpegCmd.StderrPipe()
+		if err != nil {
+			return
+		}
+		defer ffpmegStdOut.Close()
+		err = ffmpegCmd.Start()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			defer wg.Done()
+			stdinWriter := bufio.NewWriter(ffpmegStdIn)
+			populateffmpegPipe(*frameRatePtr, stdinWriter, ffpmegStdOut)
+		}()
+	} else {
+		go func() {
+			defer wg.Done()
+			populateOutput(*frameRatePtr, *outputPtr)
+		}()
+	}
 	wg.Wait()
+
 }
-func iterate(path string) {
+func iterate(path string, del bool) {
 	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			c, _ := os.Getwd()
 			fmt.Printf(c)
 			log.Fatalf(err.Error() + path)
 		}
-		var imgDate imageSequence
-		imgDate.path = path
-		imgDate.fileName = info.Name()
+		var imgData imageSequence
+		imgData.path = path
+		imgData.fileName = info.Name()
 		f := info.Name()
 		if len(f) <= 4 {
 			return nil
@@ -77,16 +115,47 @@ func iterate(path string) {
 			seq, err = strconv.Atoi(f)
 		}
 		if err == nil {
-			imgDate.seq = seq
-			images[seq] = imgDate
+			if del {
+				os.Remove(imgData.path)
+			} else {
+				imgData.seq = seq
+				imgData.data, _ = ioutil.ReadFile(imgData.path)
+				images[seq] = imgData
+			}
 		}
 
 		return nil
 	})
 }
 
+func populateffmpegPipe(frameRate int, filePtr *bufio.Writer, ffmpegout io.ReadCloser) {
+	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to ffmpeg stdin
+	inputIdx := 1
+	for {
+		time.Sleep(time.Millisecond * time.Duration(updateTime))
+		source, sourceError := os.Open(images[1].path)
+		if sourceError != nil {
+			log.Fatal(sourceError)
+		}
+		defer source.Close()
+		_, copyError := io.Copy(filePtr, source)
+		if copyError != nil {
+			var o []byte
+			fmt.Println("Error in writing to ffmpeg %s", images[inputIdx].path)
+
+			ffmpegout.Read(o)
+			fmt.Println("stdout - %s", o)
+			log.Fatal(copyError)
+		}
+		inputIdx = (inputIdx)%len(images) + 1
+		if inputIdx == 15 {
+			fmt.Println(".")
+		}
+	}
+}
+
 func populateOutput(frameRate int, outputDir string) {
-	updateTime := 1000 / frameRate // in msec, at every updateTime we add a file to output and remove 1
+	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to output and remove 1
 	outputIdx := 1
 	inputIdx := 1
 	for {
@@ -96,7 +165,7 @@ func populateOutput(frameRate int, outputDir string) {
 		}
 		copyToOutput(frameRate, outputDir, inputIdx, outputIdx)
 		outputIdx++
-		inputIdx = (inputIdx+1)/len(images) + 1
+		inputIdx = (inputIdx)%len(images) + 1
 	}
 }
 
@@ -117,8 +186,8 @@ func copyToOutput(frameRate int, outputDir string, inputIdx int, outputIdx int) 
 	if copyError != nil {
 		log.Fatal(copyError)
 	}
-	if outputIdx-(frameRate+1) > 0 {
-		delFileStr := outputDir + "loop" + strconv.Itoa(outputIdx-(frameRate+1)) + FILE_EXTN
+	if outputIdx-(frameRate*45) > 0 { //keep 45 seconds of output
+		delFileStr := outputDir + "loop" + strconv.Itoa(outputIdx-(frameRate*45)) + FILE_EXTN
 		delError := os.Remove(delFileStr)
 		if delError != nil {
 			log.Fatal(delError)
