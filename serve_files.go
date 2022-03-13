@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -39,12 +40,22 @@ var debugSet bool
 
 func main() {
 	var wg sync.WaitGroup
-	inputPtr := flag.String("input", "z:\\images", "Input Source for images")
+	var defInputPtr, defOutoutPtr, ffmpegCmd string
+	if runtime.GOOS == "windows" {
+		defInputPtr = "z:\\images"
+		defOutoutPtr = "z:\\loopImages"
+		ffmpegCmd = "C:\\Users\\nkark\\Downloads\\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\\bin\\ffmpeg"
+	} else {
+		defInputPtr = "/Users/nkarkhan/Documents/GitHub/FrameRateTest/images"
+		defOutoutPtr = "/Users/nkarkhan/Documents/GitHub/FrameRateTest/loopImages"
+		ffmpegCmd = "ffmpeg"
+	}
+	inputPtr := flag.String("input", defInputPtr, "Input Source for images")
 	d := flag.Bool("debug", false, "Debug tracing")
 	pipe := flag.Bool("pipe", false, "pipe to ffmpeg directly")
 	flag.Parse()
 	debugSet = *d
-	outputPtr := flag.String("output", "z:\\loopImages\\", "Output Dir for images")
+	outputPtr := flag.String("output", defOutoutPtr, "Output Dir for images")
 	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 	images = make(map[int]imageSequence)
 	iterate(*outputPtr, true) //clean output files
@@ -60,7 +71,7 @@ func main() {
 		fmt.Println("Running the camera stream")
 		//C:\Users\nkark\Downloads\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\bin>ffmpeg -framerate 30 -thread_queue_size 20480 -start_number 1 -i "z:\loopImages\loop%d.png" -codec:v mpeg4    -preset ultrafast  -f mpegts udp://127.0.0.1:5555 -loglevel info
 
-		ffmpegCmd := exec.Command("C:\\Users\\nkark\\Downloads\\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\\bin\\ffmpeg",
+		ffmpegCmd := exec.Command(ffmpegCmd,
 			"-loglevel", "debug", "-re", "-f", "image2pipe", "-thread_queue_size", "2048", "-i", "-",
 			"-codec:", "v", "mpeg4", "-f", "mpegts", "udp:", "////127.0.0.1:5555",
 			"")
@@ -148,9 +159,7 @@ func populateffmpegPipe(frameRate int, filePtr *bufio.Writer, ffmpegout io.ReadC
 			log.Fatal(copyError)
 		}
 		inputIdx = (inputIdx)%len(images) + 1
-		if inputIdx == 15 {
-			fmt.Println(".")
-		}
+
 	}
 }
 
