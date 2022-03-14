@@ -63,7 +63,7 @@ func main() {
 	log.Println("Number of files ", len(images))
 	for index := 1; index <= len(images); index++ {
 		if debugSet {
-			log.Println("index %d - Image %v", index, images[index])
+			log.Println("index %d - Image %s", index, images[index].fileName)
 		}
 	}
 	wg.Add(1)
@@ -72,12 +72,11 @@ func main() {
 		//C:\Users\nkark\Downloads\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\bin>ffmpeg -framerate 30 -thread_queue_size 20480 -start_number 1 -i "z:\loopImages\loop%d.png" -codec:v mpeg4    -preset ultrafast  -f mpegts udp://127.0.0.1:5555 -loglevel info
 
 		ffmpegCmd := exec.Command(ffmpegCmd,
-			"-loglevel", "debug", "-re", "-f", "image2pipe", "-thread_queue_size", "2048", "-i", "-",
-			"-codec:", "v", "mpeg4", "-f", "mpegts", "udp:", "////127.0.0.1:5555",
-			"")
-
+			"-loglevel", "debug", "-re", "-f", "image2pipe", "-framerate", "30", "-thread_queue_size", "2048", "-i", "-",
+			"-codec:v", "mpeg4", "-b:v", "10M", "-maxrate", "30M", "-bufsize", "1M", "-f", "mpegts", "udp://192.168.86.24:5555")
 		ffpmegStdIn, err := ffmpegCmd.StdinPipe()
 		if err != nil {
+			log.Fatal(err)
 			return
 		}
 		defer ffpmegStdIn.Close()
@@ -85,17 +84,26 @@ func main() {
 		if err != nil {
 			return
 		}
-		defer ffpmegStdOut.Close()
 		err = ffmpegCmd.Start()
-
 		if err != nil {
 			log.Fatal(err)
 		}
+		stdout := bufio.NewScanner(ffpmegStdOut)
+		go func(dumpFfmpeg *bufio.Scanner) {
+			fmt.Println("ffmpeg output")
+			for dumpFfmpeg.Scan() {
+				fmt.Println("-")
+				fmt.Println(dumpFfmpeg.Text())
+			}
+		}(stdout)
+
 		go func() {
 			defer wg.Done()
-			stdinWriter := bufio.NewWriter(ffpmegStdIn)
-			populateffmpegPipe(*frameRatePtr, stdinWriter, ffpmegStdOut)
+			//			stdinWriter := bufio.NewReader(ffpmegStdIn)
+			populateffmpegPipe(*frameRatePtr, ffpmegStdIn)
 		}()
+
+		ffmpegCmd.Wait()
 	} else {
 		go func() {
 			defer wg.Done()
@@ -139,27 +147,20 @@ func iterate(path string, del bool) {
 	})
 }
 
-func populateffmpegPipe(frameRate int, filePtr *bufio.Writer, ffmpegout io.ReadCloser) {
+func populateffmpegPipe(frameRate int, filePtr io.WriteCloser) {
 	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to ffmpeg stdin
 	inputIdx := 1
+	totalBytesWritten := 0
 	for {
 		time.Sleep(time.Millisecond * time.Duration(updateTime))
-		source, sourceError := os.Open(images[1].path)
-		if sourceError != nil {
-			log.Fatal(sourceError)
-		}
-		defer source.Close()
-		_, copyError := io.Copy(filePtr, source)
-		if copyError != nil {
-			var o []byte
-			fmt.Println("Error in writing to ffmpeg %s", images[inputIdx].path)
-
-			ffmpegout.Read(o)
-			fmt.Println("stdout - %s", o)
-			log.Fatal(copyError)
+		source := images[inputIdx].data
+		writeCnt, err := filePtr.Write(source)
+		totalBytesWritten = totalBytesWritten + writeCnt
+		if err != nil {
+			fmt.Printf("Bytes Written %d on file %d", totalBytesWritten, inputIdx)
+			log.Fatal(err)
 		}
 		inputIdx = (inputIdx)%len(images) + 1
-
 	}
 }
 
