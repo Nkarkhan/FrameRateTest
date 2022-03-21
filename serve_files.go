@@ -73,7 +73,7 @@ func main() {
 
 		ffmpegCmd := exec.Command(ffmpegCmd,
 			"-loglevel", "debug", "-re", "-f", "image2pipe", "-framerate", "30", "-thread_queue_size", "2048", "-i", "-",
-			"-codec:v", "mpeg4", "-b:v", "10M", "-maxrate", "30M", "-bufsize", "1M", "-f", "mpegts", "udp://192.168.86.24:5555")
+			"-codec:v", "mpeg4", "-bf", "4", "-b:v", "10M", "-maxrate", "30M", "-bufsize", "1M", "-f", "mpegts", "udp://192.168.86.24:5555")
 		ffpmegStdIn, err := ffmpegCmd.StdinPipe()
 		if err != nil {
 			log.Fatal(err)

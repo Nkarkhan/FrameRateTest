@@ -13,7 +13,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "serve_files.go",
-            "args": ["-debug"]
+            "args": ["-pipe"]
         }
     ]
 }
