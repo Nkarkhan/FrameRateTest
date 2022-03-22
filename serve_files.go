@@ -40,14 +40,12 @@ var debugSet bool
 
 func main() {
 	var wg sync.WaitGroup
-	var defInputPtr, defOutoutPtr, ffmpegCmd string
+	var defInputPtr, ffmpegCmd string
 	if runtime.GOOS == "windows" {
-		defInputPtr = "z:\\images"
-		defOutoutPtr = "z:\\loopImages"
+		defInputPtr = "C:\\Users\\nkark\\OneDrive\\Documents\\GitHub\\FrameRateTest\\images"
 		ffmpegCmd = "C:\\Users\\nkark\\Downloads\\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\\bin\\ffmpeg"
 	} else {
 		defInputPtr = "/Users/nkarkhan/Documents/GitHub/FrameRateTest/images"
-		defOutoutPtr = "/Users/nkarkhan/Documents/GitHub/FrameRateTest/loopImages"
 		ffmpegCmd = "ffmpeg"
 	}
 	inputPtr := flag.String("input", defInputPtr, "Input Source for images")
@@ -55,10 +53,8 @@ func main() {
 	pipe := flag.Bool("pipe", false, "pipe to ffmpeg directly")
 	flag.Parse()
 	debugSet = *d
-	outputPtr := flag.String("output", defOutoutPtr, "Output Dir for images")
 	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 	images = make(map[int]imageSequence)
-	iterate(*outputPtr, true) //clean output files
 	iterate(*inputPtr, false)
 	log.Println("Number of files ", len(images))
 	for index := 1; index <= len(images); index++ {
@@ -69,11 +65,12 @@ func main() {
 	wg.Add(1)
 	if *pipe {
 		fmt.Println("Running the camera stream")
-		//C:\Users\nkark\Downloads\ffmpeg-2022-02-24-git-8ef03c2ff1-full_build\bin>ffmpeg -framerate 30 -thread_queue_size 20480 -start_number 1 -i "z:\loopImages\loop%d.png" -codec:v mpeg4    -preset ultrafast  -f mpegts udp://127.0.0.1:5555 -loglevel info
 
 		ffmpegCmd := exec.Command(ffmpegCmd,
-			"-loglevel", "debug", "-re", "-f", "image2pipe", "-framerate", "30", "-thread_queue_size", "2048", "-i", "-",
-			"-codec:v", "mpeg4", "-bf", "4", "-b:v", "10M", "-maxrate", "30M", "-bufsize", "1M", "-f", "mpegts", "udp://192.168.86.24:5555")
+			"-loglevel", "error", "-re", "-hwaccel", "cuda",
+			"-max_delay", "0", "-max_probe_packets", "1",
+			"-f", "image2pipe", "-framerate", "30", "-i", "-",
+			"-codec:v", "rawvideo", "-f", "mpegts", "-muxdelay", "0", "udp://127.0.0.1:5555")
 		ffpmegStdIn, err := ffmpegCmd.StdinPipe()
 		if err != nil {
 			log.Fatal(err)
@@ -104,11 +101,6 @@ func main() {
 		}()
 
 		ffmpegCmd.Wait()
-	} else {
-		go func() {
-			defer wg.Done()
-			populateOutput(*frameRatePtr, *outputPtr)
-		}()
 	}
 	wg.Wait()
 
@@ -151,6 +143,7 @@ func populateffmpegPipe(frameRate int, filePtr io.WriteCloser) {
 	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to ffmpeg stdin
 	inputIdx := 1
 	totalBytesWritten := 0
+	fmt.Println("Time to queue images ", time.Now().String())
 	for {
 		time.Sleep(time.Millisecond * time.Duration(updateTime))
 		source := images[inputIdx].data
@@ -161,46 +154,5 @@ func populateffmpegPipe(frameRate int, filePtr io.WriteCloser) {
 			log.Fatal(err)
 		}
 		inputIdx = (inputIdx)%len(images) + 1
-	}
-}
-
-func populateOutput(frameRate int, outputDir string) {
-	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to output and remove 1
-	outputIdx := 1
-	inputIdx := 1
-	for {
-		if outputIdx > frameRate {
-
-			time.Sleep(time.Millisecond * time.Duration(updateTime))
-		}
-		copyToOutput(frameRate, outputDir, inputIdx, outputIdx)
-		outputIdx++
-		inputIdx = (inputIdx)%len(images) + 1
-	}
-}
-
-func copyToOutput(frameRate int, outputDir string, inputIdx int, outputIdx int) {
-	outputFileStr := outputDir + "loop" + strconv.Itoa(outputIdx) + FILE_EXTN
-	source, sourceError := os.Open(images[inputIdx].path)
-	if sourceError != nil {
-		log.Fatal(sourceError)
-	}
-	defer source.Close()
-
-	target, targetError := os.OpenFile(outputFileStr, os.O_RDWR|os.O_CREATE, 0666)
-	if targetError != nil {
-		log.Fatal(targetError)
-	}
-	defer target.Close()
-	_, copyError := io.Copy(target, source)
-	if copyError != nil {
-		log.Fatal(copyError)
-	}
-	if outputIdx-(frameRate*45) > 0 { //keep 45 seconds of output
-		delFileStr := outputDir + "loop" + strconv.Itoa(outputIdx-(frameRate*45)) + FILE_EXTN
-		delError := os.Remove(delFileStr)
-		if delError != nil {
-			log.Fatal(delError)
-		}
 	}
 }
