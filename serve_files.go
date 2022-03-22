@@ -140,10 +140,10 @@ func iterate(path string, del bool) {
 }
 
 func populateffmpegPipe(frameRate int, filePtr io.WriteCloser) {
-	updateTime := 1000 / (frameRate + 3) // in msec, at every updateTime we add a file to ffmpeg stdin
+	updateTime := 1000 / (frameRate*2 + 3) // in msec, at every updateTime we add a file to ffmpeg stdin
 	inputIdx := 1
 	totalBytesWritten := 0
-	fmt.Println("Time to queue images ", time.Now().String())
+	printTime := true
 	for {
 		time.Sleep(time.Millisecond * time.Duration(updateTime))
 		source := images[inputIdx].data
@@ -152,6 +152,10 @@ func populateffmpegPipe(frameRate int, filePtr io.WriteCloser) {
 		if err != nil {
 			fmt.Printf("Bytes Written %d on file %d", totalBytesWritten, inputIdx)
 			log.Fatal(err)
+		}
+		if printTime {
+			fmt.Println("Time to queue images ", time.Now().String())
+			printTime = false
 		}
 		inputIdx = (inputIdx)%len(images) + 1
 	}
