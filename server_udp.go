@@ -73,13 +73,14 @@ func setupClient(serverAddress string,
 	// 30 hz is what we target
 	// Time for each frame is 1000/30 msec
 	timeForEachFrame := int(1000 / frameRate)
+	counter := byte(0)
 	for {
-		counter := byte(0)
 		t := time.Now()
 		for _, buf := range buffers {
 			counter = counter + 1
 			buf[0] = counter
 			_, err := con.Write(buf)
+			time.Sleep(time.Millisecond)
 			if err != nil {
 				fmt.Println("Error writing:", err.Error())
 				panic(err)
@@ -126,6 +127,7 @@ func handleRequest(pConn net.PacketConn, fSize int) {
 			if buf[0] != save_counter+1 {
 				fmt.Println("Missed Packet expected and received", save_counter, buf[0])
 			}
+			save_counter = buf[0]
 		}
 		if time.Since(t) >= time.Duration(time.Second) {
 			fmt.Println("Frame Rate: ", hz)
