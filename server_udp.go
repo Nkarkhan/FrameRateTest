@@ -11,19 +11,19 @@ import (
 )
 
 const (
-	CONN_HOST   = "localhost"
-	CONN_PORT   = "3333"
+	CONN_HOST   = "127.0.0.1"
+	CONN_PORT   = 5555
 	CONN_TYPE   = "udp"
 	MAX_WR_SZ   = 1460
-	FILE_SZ     = 10000 // 1 Mb files
+	FILE_SZ     = 500 * 1024 // 1 Mb files
 	FILE_SZ_STR = "File Size:"
 )
 
 func main() {
 	serverPtr := flag.Bool("server", false, "is this the server")
-	addressPtr := flag.String("address", "localhost", "Bind/target address for server/client")
-	portPtr := flag.Int("port", 3333, "Bind/target port for server/client")
-	fileSzPtr := flag.Int("fSize", 100000, "File Size")
+	addressPtr := flag.String("address", CONN_HOST, "Bind/target address for server/client")
+	portPtr := flag.Int("port", CONN_PORT, "Bind/target port for server/client")
+	fileSzPtr := flag.Int("fSize", 500*1024, "File Size")
 	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 
 	flag.Parse()
@@ -44,7 +44,8 @@ func setupServer(serverAddress string,
 	serverPort int,
 	fileSize int) {
 	// Listen for incoming connections.
-	l, err := net.ListenPacket(CONN_TYPE, serverAddress+":"+strconv.Itoa(serverPort))
+	addr, _ := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort))
+	l, err := net.ListenUDP(CONN_TYPE, addr)
 	if err != nil {
 		fmt.Println("Error listening:", err.Error())
 		os.Exit(1)
@@ -60,7 +61,10 @@ func setupClient(serverAddress string,
 	serverPort int,
 	fileSize int,
 	frameRate int) {
-	con, err := net.Dial(CONN_TYPE, serverAddress+":"+strconv.Itoa(serverPort))
+	addr, err := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort))
+	listenaddr, err := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort+1))
+	con, err := net.ListenUDP(CONN_TYPE, listenaddr)
+
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -79,18 +83,15 @@ func setupClient(serverAddress string,
 		for _, buf := range buffers {
 			counter = counter + 1
 			buf[0] = counter
-			_, err := con.Write(buf)
-			time.Sleep(time.Millisecond)
+			_, err := con.WriteToUDP(buf, addr)
 			if err != nil {
 				fmt.Println("Error writing:", err.Error())
 				panic(err)
 			}
 		}
-		//		if wrLen != fileSize {
-		//			fmt.Println("Wrote :", wrLen)
-		//		}
 		if time.Since(t) > time.Duration(timeForEachFrame*int(time.Millisecond)) {
-			fmt.Println("Falling behind")
+			x := time.Since(t)
+			fmt.Println("Falling behind", x)
 		} else {
 			for time.Since(t) < time.Duration(timeForEachFrame*int(time.Millisecond)) {
 				time.Sleep(time.Millisecond)
