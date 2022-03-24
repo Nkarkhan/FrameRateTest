@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,18 +34,36 @@ func main() {
 	fmt.Println("fileSz:", *fileSzPtr)
 	fmt.Println("Hz:", *frameRatePtr)
 	if *serverPtr {
-		setupServer(*addressPtr, *portPtr, *fileSzPtr)
+		setupServer(*portPtr, *fileSzPtr)
 	} else {
 		setupClient(*addressPtr, *portPtr, *fileSzPtr, *frameRatePtr)
 	}
 }
 
+// GetLocalIP returns the non loopback local IP of the host
+func GetLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				if strings.Contains(ipnet.IP.String(), "192") {
+					return ipnet.IP.String()
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // Setup Server
-func setupServer(serverAddress string,
-	serverPort int,
+func setupServer(serverPort int,
 	fileSize int) {
 	// Listen for incoming connections.
-	addr, _ := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort))
+	addr, _ := net.ResolveUDPAddr("udp", GetLocalIP()+":"+strconv.Itoa(serverPort))
 	l, err := net.ListenUDP(CONN_TYPE, addr)
 	if err != nil {
 		fmt.Println("Error listening:", err.Error())
@@ -52,7 +71,7 @@ func setupServer(serverAddress string,
 	}
 	// Close the listener when the application closes.
 	defer l.Close()
-	fmt.Println("Listening on " + serverAddress + ":" + strconv.Itoa(serverPort))
+	fmt.Println("Listening on " + GetLocalIP() + ":" + strconv.Itoa(serverPort))
 	// Handle connections in a new goroutine.
 	handleRequest(l, fileSize)
 }
@@ -62,9 +81,13 @@ func setupClient(serverAddress string,
 	fileSize int,
 	frameRate int) {
 	addr, err := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort))
-	listenaddr, err := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort+1))
-	con, err := net.ListenUDP(CONN_TYPE, listenaddr)
-
+	//	listenaddr, err := net.ResolveUDPAddr("udp", GetLocalIP()+":"+strconv.Itoa(serverPort+1))
+	con, err := net.DialUDP(CONN_TYPE, nil, addr)
+	fmt.Println("Sending from " + GetLocalIP() + ":" + strconv.Itoa(serverPort))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	err = con.SetWriteBuffer(64 * 1024 * 1024)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -83,7 +106,7 @@ func setupClient(serverAddress string,
 		for _, buf := range buffers {
 			counter = counter + 1
 			buf[0] = counter
-			_, err := con.WriteToUDP(buf, addr)
+			_, err := con.Write(buf)
 			if err != nil {
 				fmt.Println("Error writing:", err.Error())
 				panic(err)
