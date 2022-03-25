@@ -16,7 +16,7 @@ const (
 	CONN_PORT   = 5555
 	CONN_TYPE   = "udp"
 	MAX_WR_SZ   = 1460
-	FILE_SZ     = 500 * 1024 // 1 Mb files
+	FILE_SZ     = 500 * 1024 // Simulated file Size
 	FILE_SZ_STR = "File Size:"
 )
 
@@ -24,19 +24,17 @@ func main() {
 	serverPtr := flag.Bool("server", false, "is this the server")
 	addressPtr := flag.String("address", CONN_HOST, "Bind/target address for server/client")
 	portPtr := flag.Int("port", CONN_PORT, "Bind/target port for server/client")
-	fileSzPtr := flag.Int("fSize", 500*1024, "File Size")
 	frameRatePtr := flag.Int("frameRate", 30, "Frame Rate in Hz")
 
 	flag.Parse()
 	fmt.Println("ServerMode:", *serverPtr)
 	fmt.Println("address:", *addressPtr)
 	fmt.Println("port:", *portPtr)
-	fmt.Println("fileSz:", *fileSzPtr)
 	fmt.Println("Hz:", *frameRatePtr)
 	if *serverPtr {
-		setupServer(*portPtr, *fileSzPtr)
+		setupServer(*portPtr, *frameRatePtr)
 	} else {
-		setupClient(*addressPtr, *portPtr, *fileSzPtr, *frameRatePtr)
+		setupClient(*addressPtr, *portPtr, *frameRatePtr)
 	}
 }
 
@@ -60,8 +58,7 @@ func GetLocalIP() string {
 }
 
 // Setup Server
-func setupServer(serverPort int,
-	fileSize int) {
+func setupServer(serverPort int, frameRate int) {
 	// Listen for incoming connections.
 	addr, _ := net.ResolveUDPAddr("udp", GetLocalIP()+":"+strconv.Itoa(serverPort))
 	l, err := net.ListenUDP(CONN_TYPE, addr)
@@ -73,12 +70,11 @@ func setupServer(serverPort int,
 	defer l.Close()
 	fmt.Println("Listening on " + GetLocalIP() + ":" + strconv.Itoa(serverPort))
 	// Handle connections in a new goroutine.
-	handleRequest(l, fileSize)
+	handleRequest(l, frameRate)
 }
 
 func setupClient(serverAddress string,
 	serverPort int,
-	fileSize int,
 	frameRate int) {
 	addr, err := net.ResolveUDPAddr("udp", serverAddress+":"+strconv.Itoa(serverPort))
 	//	listenaddr, err := net.ResolveUDPAddr("udp", GetLocalIP()+":"+strconv.Itoa(serverPort+1))
@@ -92,19 +88,22 @@ func setupClient(serverAddress string,
 		log.Fatalln(err)
 	}
 	defer con.Close()
-	buffers := make([][]byte, fileSize/MAX_WR_SZ)
-	for i := 0; i < fileSize/MAX_WR_SZ; i++ {
+	buffers := make([][]byte, FILE_SZ/MAX_WR_SZ)
+	for i := 0; i < FILE_SZ/MAX_WR_SZ; i++ {
 		buffers[i] = make([]byte, MAX_WR_SZ)
 	}
 	hz := 0
 	// 30 hz is what we target
 	// Time for each frame is 1000/30 msec
 	timeForEachFrame := int(1000 / frameRate)
-	counter := byte(0)
+	frame := byte(0)
 	for {
 		t := time.Now()
+		counter := byte(0)
+		frame++
 		for _, buf := range buffers {
-			counter = counter + 1
+			counter++
+			buf[1] = frame
 			buf[0] = counter
 			_, err := con.Write(buf)
 			if err != nil {
@@ -129,29 +128,40 @@ func setupClient(serverAddress string,
 }
 
 // Handles incoming requests.
-func handleRequest(pConn net.PacketConn, fSize int) {
+func handleRequest(pConn *net.UDPConn, frameRate int) {
 	defer pConn.Close()
+	pConn.SetReadBuffer(64 * 1024 * 1024)
 	// Make a buffer to hold incoming data.
-	buf := make([]byte, fSize+1000)
+	buf := make([]byte, 1600)
 	// Print chunks of filebuffer received every second
 	t := time.Now()
 	hz := 0
-	totalRead := 0
-	save_counter := byte(0)
+	frame := byte(0)
+	frame_pkt := byte(0)
 	for {
 		rdLen, _, err := pConn.ReadFrom(buf)
 		if err != nil {
 			panic(err)
 		}
 		if rdLen != 0 {
-			totalRead = totalRead + rdLen
-			framesHere := totalRead / fSize
-			totalRead = totalRead % fSize
-			hz = hz + framesHere
-			if buf[0] != save_counter+1 {
-				fmt.Println("Missed Packet expected and received", save_counter, buf[0])
+			if buf[0] != frame {
+				if buf[0] != frame+1 {
+					fmt.Println("Expected Fram %d and received %d", frame+1, buf[0])
+				} else {
+					if time.Since(t) >= time.Duration(time.Second) {
+						if hz < (frameRate - 2) {
+							fmt.Println("Frame Rate dropped - expected %d got %d", frameRate, hz)
+						}
+					}
+				}
+				frame = buf[0]
+				t = time.Now()
+			} else {
+				if buf[0] != frame_pkt+1 {
+					fmt.Println(" Dropped frames expected %d got %d", frame_pkt+1, buf[0])
+				}
+				frame_pkt = buf[0]
 			}
-			save_counter = buf[0]
 		}
 		if time.Since(t) >= time.Duration(time.Second) {
 			fmt.Println("Frame Rate: ", hz)
